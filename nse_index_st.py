@@ -11,6 +11,7 @@ import plotly.express as px
 from datetime import datetime, timedelta, date
 import requests
 import json
+import os
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 from natsort import natsorted
@@ -105,14 +106,54 @@ NSE_HEADERS = {
     'Upgrade-Insecure-Requests': '1',
 }
 
+def load_local_nse_indices() -> Dict[str, str]:
+    """
+    Load NSE indices from local JSON file
+    Returns a dictionary with indexName as key and indexSymbol as value
+    """
+    local_file_path = "assets/nse-index-names.json"
+    
+    try:
+        if os.path.exists(local_file_path):
+            with open(local_file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            indices = {}
+            
+            # Parse the response - each item is [indexSymbol, indexName]
+            if 'stn' in data:
+                for item in data['stn']:
+                    if len(item) >= 2:
+                        index_symbol = item[0]
+                        index_name = item[1]
+                        if "NIFTY" in index_name:
+                            index_name = "NIFTY " + index_name.split("NIFTY", 1)[1].strip()
+                        indices[index_name] = index_symbol
+            
+            return indices
+        else:
+            return {"error": f"Local file not found: {local_file_path}"}
+            
+    except Exception as e:
+        return {
+            "error": f"Error reading local NSE indices file: {str(e)}",
+            "error_details": {
+                "file_path": local_file_path,
+                "exception_type": type(e).__name__,
+                "exception_message": str(e)
+            }
+        }
+
 @st.cache_data()
 def fetch_nse_indices() -> Dict[str, str]:
     """
-    Fetch all NSE indices from the NSE API
+    Fetch all NSE indices from the NSE API with local JSON fallback
     Returns a dictionary with indexName as key and indexSymbol as value
     """
+    api_error_details = None
+    
+    # First try the API
     try:
-        # Now fetch the indices
         response = requests.get('https://www.nseindia.com/api/index-names', headers=NSE_HEADERS, timeout=10)
         
         if response.status_code == 200:
@@ -131,8 +172,8 @@ def fetch_nse_indices() -> Dict[str, str]:
             
             return indices
         else:
-            # Capture detailed error information
-            error_details = {
+            # Capture API error details
+            api_error_details = {
                 "status_code": response.status_code,
                 "reason": response.reason,
                 "headers": dict(response.headers),
@@ -141,21 +182,31 @@ def fetch_nse_indices() -> Dict[str, str]:
             
             # Try to get response text
             try:
-                error_details["response_text"] = response.text[:500]  # First 500 chars
+                api_error_details["response_text"] = response.text[:500]  # First 500 chars
             except:
-                error_details["response_text"] = "Could not read response text"
-            
-            return {
-                "error": f"Failed to fetch indices: HTTP {response.status_code} - {response.reason}",
-                "error_details": error_details
-            }
+                api_error_details["response_text"] = "Could not read response text"
             
     except Exception as e:
+        # Capture API exception details
+        api_error_details = {
+            "exception_type": type(e).__name__,
+            "exception_message": str(e)
+        }
+    
+    # API failed, try local fallback
+    st.warning("⚠️ NSE List-Indices API unavailable, using local list...")
+    local_result = load_local_nse_indices()
+    
+    if "error" not in local_result:
+        # Successfully loaded from local file
+        return local_result
+    else:
+        # Both API and local file failed
         return {
-            "error": f"Error fetching NSE indices: {str(e)}",
+            "error": f"Both NSE API and local fallback failed",
             "error_details": {
-                "exception_type": type(e).__name__,
-                "exception_message": str(e)
+                "api_error": api_error_details,
+                "local_error": local_result.get("error_details", local_result.get("error"))
             }
         }
 
@@ -461,7 +512,6 @@ def main():
                             st.write(f"**HTTP Status Code:** {error_details['status_code']}")
                             st.write(f"**Reason:** {error_details['reason']}")
                             st.write(f"**URL:** {error_details['url']}")
-                            st.write(f"**Main Page Status:** {error_details['main_page_status']}")
                             
                             if "response_text" in error_details:
                                 st.write(f"**Response Text:**")
@@ -552,7 +602,6 @@ def main():
                         st.write(f"**URL:** {error_details['url']}")
                         st.write(f"**HTTP Status Code:** {error_details['status_code']}")
                         st.write(f"**Reason:** {error_details['reason']}")
-                        st.write(f"**Main Page Status:** {error_details['main_page_status']}")
                         
                         if "response_text" in error_details:
                             st.write(f"**Response Text:**")
