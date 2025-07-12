@@ -15,6 +15,7 @@ import os
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 from natsort import natsorted
+import time
 
 # Page configuration
 st.set_page_config(
@@ -98,13 +99,55 @@ st.markdown("""
 
 # Headers for NSE API requests
 NSE_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
+    'Sec-Ch-Ua': '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+    'Sec-Ch-Ua-Mobile': '?1',
+    'Sec-Ch-Ua-Platform': '"Android"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Priority': 'u=0, i',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
 }
+
+def create_nse_session():
+    """
+    Create a session with NSE website to get necessary cookies
+    """
+    session = requests.Session()
+    
+    try:
+        # First, visit the main NSE page to get cookies
+        response = session.get('https://www.nseindia.com/', headers=NSE_HEADERS, timeout=15)
+        
+        if response.status_code == 200:
+            # Small delay to mimic human behavior
+            time.sleep(1)
+            
+            # Update headers for API requests
+            api_headers = NSE_HEADERS.copy()
+            api_headers.update({
+                'Accept': 'application/json, text/plain, */*',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': 'https://www.nseindia.com/'
+            })
+            
+            return session, api_headers
+        else:
+            return None, None
+            
+    except Exception as e:
+        return None, None
 
 def load_local_nse_indices() -> Dict[str, str]:
     """
@@ -152,45 +195,57 @@ def fetch_nse_indices() -> Dict[str, str]:
     """
     api_error_details = None
     
-    # First try the API
+    # First try the API with session-based cookies
     try:
-        response = requests.get('https://www.nseindia.com/api/index-names', headers=NSE_HEADERS, timeout=10)
+        session, api_headers = create_nse_session()
         
-        if response.status_code == 200:
-            data = response.json()
-            indices = {}
+        if session and api_headers:
+            response = session.get('https://www.nseindia.com/api/index-names', headers=api_headers, timeout=10)
             
-            # Parse the response - each item is [indexSymbol, indexName]
-            if 'stn' in data:
-                for item in data['stn']:
-                    if len(item) >= 2:
-                        index_symbol = item[0]
-                        index_name = item[1]
-                        if "NIFTY" in index_name:
-                            index_name = "NIFTY " + index_name.split("NIFTY", 1)[1].strip()
-                        indices[index_name] = index_symbol
-            
-            return indices
+            if response.status_code == 200:
+                data = response.json()
+                indices = {}
+                
+                # Parse the response - each item is [indexSymbol, indexName]
+                if 'stn' in data:
+                    for item in data['stn']:
+                        if len(item) >= 2:
+                            index_symbol = item[0]
+                            index_name = item[1]
+                            if "NIFTY" in index_name:
+                                index_name = "NIFTY " + index_name.split("NIFTY", 1)[1].strip()
+                            indices[index_name] = index_symbol
+                
+                return indices
+            else:
+                # Capture API error details
+                api_error_details = {
+                    "status_code": response.status_code,
+                    "reason": response.reason,
+                    "headers": dict(response.headers),
+                    "url": response.url,
+                    "cookies": dict(session.cookies),
+                    "session_created": "Yes"
+                }
+                
+                # Try to get response text
+                try:
+                    api_error_details["response_text"] = response.text[:500]  # First 500 chars
+                except:
+                    api_error_details["response_text"] = "Could not read response text"
         else:
-            # Capture API error details
+            # Session creation failed
             api_error_details = {
-                "status_code": response.status_code,
-                "reason": response.reason,
-                "headers": dict(response.headers),
-                "url": response.url,
+                "session_created": "No",
+                "error": "Failed to create NSE session"
             }
-            
-            # Try to get response text
-            try:
-                api_error_details["response_text"] = response.text[:500]  # First 500 chars
-            except:
-                api_error_details["response_text"] = "Could not read response text"
             
     except Exception as e:
         # Capture API exception details
         api_error_details = {
             "exception_type": type(e).__name__,
-            "exception_message": str(e)
+            "exception_message": str(e),
+            "session_created": "Unknown"
         }
     
     # API failed, try local fallback
@@ -218,11 +273,23 @@ def fetch_nse_historical_data(index_symbol: str, max_years: int = 20) -> Dict:
     last_error_details = None
     
     try:
+        # Create session with cookies first
+        session, api_headers = create_nse_session()
+        
+        if not session or not api_headers:
+            return {
+                "error": "Failed to create NSE session with cookies",
+                "error_details": {
+                    "session_created": "No",
+                    "error": "Could not establish session with NSE website"
+                }
+            }
+        
         for years in range(max_years, 0, -1):
             url = f"https://www.nseindia.com/api/NextApi/apiClient/historicalGraph?functionName=getIndexChart&&index={index_symbol}&flag={years}Y"
             
             try:
-                response = requests.get(url, headers=NSE_HEADERS, timeout=15)
+                response = session.get(url, headers=api_headers, timeout=15)
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -284,7 +351,8 @@ def fetch_nse_historical_data(index_symbol: str, max_years: int = 20) -> Dict:
                                 'cagr': cagr,
                                 'absolute_change': last_close - first_close,
                                 'percentage_change': ((last_close - first_close) / first_close) * 100 if first_close > 0 else 0,
-                                'years_fetched': years
+                                'years_fetched': years,
+                                'session_cookies': dict(session.cookies)
                             }
                 
             except Exception as e:
@@ -296,6 +364,7 @@ def fetch_nse_historical_data(index_symbol: str, max_years: int = 20) -> Dict:
                     "reason": getattr(response, 'reason', 'N/A'),
                     "exception_type": type(e).__name__,
                     "exception_message": str(e),
+                    "session_cookies": dict(session.cookies) if session else "No session"
                 }
                 
                 # Try to get response text if response exists
@@ -343,11 +412,11 @@ def calculate_nse_rolling_cagr(index_symbol: str, window_years: int = 5, start_d
         stride_days: Number of days to move forward for each window (default is 21 days, without weekends)
     """
     try:
-        # Fetch historical data
+        # Fetch historical data using session-based approach
         historical_result = fetch_nse_historical_data(index_symbol, max_years=20)
         
         if "error" in historical_result:
-            return {"error": historical_result["error"]}
+            return {"error": historical_result["error"], "error_details": historical_result.get("error_details", {})}
         
         df = historical_result['historical_data']
         
@@ -436,7 +505,11 @@ def calculate_nse_rolling_cagr(index_symbol: str, window_years: int = 5, start_d
             'std_cagr': round(std_cagr, 2),
             'min_cagr': round(min(valid_cagrs), 2),
             'max_cagr': round(max(valid_cagrs), 2),
-            'windows': windows
+            'windows': windows,
+            'session_info': {
+                'cookies_used': historical_result.get('session_cookies', 'N/A'),
+                'data_source': 'NSE API with session cookies'
+            }
         }
         
     except Exception as e:
@@ -545,7 +618,18 @@ def main():
         <div class="info-card">
             <p><strong>Total Indices:</strong> {len(all_indices)} indices</p>
             <p><strong>Data Source:</strong> NSE India Official API</p>
+            <p><strong>API Authentication:</strong> Session-based with cookies</p>
             <p><strong>Availability:</strong> All indices are available</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Add API improvement note
+        st.markdown("""
+        <div class="success-card">
+            <h4>🔧 API Improvements</h4>
+            <p>✅ Enhanced NSE API authentication with session cookies</p>
+            <p>✅ Browser-like headers for better compatibility</p>
+            <p>✅ Improved error handling and debugging</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -667,6 +751,29 @@ def main():
                 st.write(f"**Last 10 Records:**")
                 st.dataframe(result['historical_data'].tail(10))
             
+            # Display session information for debugging
+            with st.expander("🔧 API Session Debug Information"):
+                st.write(f"**Session Cookies Used:** {len(result.get('session_cookies', {}))}")
+                st.write(f"**Years of Data Fetched:** {result.get('years_fetched', 'Unknown')}")
+                st.write(f"**API Authentication:** Session-based with cookies")
+                
+                if 'session_cookies' in result:
+                    st.write(f"**Cookie Names:** {', '.join(result['session_cookies'].keys())}")
+                    
+                    # Show key cookies for debugging
+                    key_cookies = ['nsit', 'nseappid', '_abck', 'bm_sz']
+                    for cookie in key_cookies:
+                        if cookie in result['session_cookies']:
+                            cookie_value = result['session_cookies'][cookie]
+                            # Show first and last 10 characters for security
+                            if len(cookie_value) > 20:
+                                display_value = f"{cookie_value[:10]}...{cookie_value[-10:]}"
+                            else:
+                                display_value = cookie_value
+                            st.write(f"**{cookie}:** {display_value}")
+                
+                st.success("✅ NSE API authentication successful with session cookies!")
+
             # Add Rolling CAGR Analysis Section
             st.markdown("---")
             st.header("📊 Rolling CAGR Analysis")
@@ -827,6 +934,16 @@ def main():
                         file_name=f"NSE_{selected_index_name}_rolling_cagr_{rolling_result['window_years']}y.csv",
                         mime="text/csv"
                     )
+                    
+                    # Display session information for rolling CAGR
+                    with st.expander("🔧 Rolling CAGR Session Information"):
+                        if 'session_info' in rolling_result:
+                            session_info = rolling_result['session_info']
+                            st.write(f"**Data Source:** {session_info.get('data_source', 'Unknown')}")
+                            st.write(f"**Cookies Used:** {len(session_info.get('cookies_used', {}))}")
+                            st.success("✅ Rolling CAGR calculated using session-based API authentication!")
+                        else:
+                            st.info("Session information not available for this calculation.")
 
 if __name__ == "__main__":
     main() 
