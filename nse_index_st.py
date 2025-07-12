@@ -112,9 +112,6 @@ def fetch_nse_indices() -> Dict[str, str]:
     Returns a dictionary with indexName as key and indexSymbol as value
     """
     try:
-        # First make a request to the main page to get session cookies
-        requests.get('https://www.nseindia.com', headers=NSE_HEADERS, timeout=10)
-        
         # Now fetch the indices
         response = requests.get('https://www.nseindia.com/api/index-names', headers=NSE_HEADERS, timeout=10)
         
@@ -134,20 +131,42 @@ def fetch_nse_indices() -> Dict[str, str]:
             
             return indices
         else:
-            return {"error": f"Failed to fetch indices: HTTP {response.status_code}"}
+            # Capture detailed error information
+            error_details = {
+                "status_code": response.status_code,
+                "reason": response.reason,
+                "headers": dict(response.headers),
+                "url": response.url,
+            }
+            
+            # Try to get response text
+            try:
+                error_details["response_text"] = response.text[:500]  # First 500 chars
+            except:
+                error_details["response_text"] = "Could not read response text"
+            
+            return {
+                "error": f"Failed to fetch indices: HTTP {response.status_code} - {response.reason}",
+                "error_details": error_details
+            }
             
     except Exception as e:
-        return {"error": f"Error fetching NSE indices: {str(e)}"}
+        return {
+            "error": f"Error fetching NSE indices: {str(e)}",
+            "error_details": {
+                "exception_type": type(e).__name__,
+                "exception_message": str(e)
+            }
+        }
 
 def fetch_nse_historical_data(index_symbol: str, max_years: int = 20) -> Dict:
     """
     Fetch historical data for an NSE index
     Tries from max_years down to 1 year until successful
     """
+    last_error_details = None
+    
     try:
-        # First make a request to the main page to get session cookies
-        requests.get('https://www.nseindia.com', headers=NSE_HEADERS, timeout=10)
-        
         for years in range(max_years, 0, -1):
             url = f"https://www.nseindia.com/api/NextApi/apiClient/historicalGraph?functionName=getIndexChart&&index={index_symbol}&flag={years}Y"
             
@@ -218,12 +237,38 @@ def fetch_nse_historical_data(index_symbol: str, max_years: int = 20) -> Dict:
                             }
                 
             except Exception as e:
+                # Capture error details for the last attempt
+                last_error_details = {
+                    "years_attempted": years,
+                    "url": url,
+                    "status_code": getattr(response, 'status_code', 'N/A'),
+                    "reason": getattr(response, 'reason', 'N/A'),
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                }
+                
+                # Try to get response text if response exists
+                if 'response' in locals():
+                    try:
+                        last_error_details["response_text"] = response.text[:500]
+                    except:
+                        last_error_details["response_text"] = "Could not read response text"
+                
                 continue
         
-        return {"error": f"Failed to fetch historical data for {index_symbol} after trying all year ranges"}
+        return {
+            "error": f"Failed to fetch historical data for {index_symbol} after trying all year ranges (1-{max_years})",
+            "error_details": last_error_details
+        }
         
     except Exception as e:
-        return {"error": f"Error fetching historical data: {str(e)}"}
+        return {
+            "error": f"Error fetching historical data: {str(e)}",
+            "error_details": {
+                "exception_type": type(e).__name__,
+                "exception_message": str(e)
+            }
+        }
 
 def calculate_nse_cagr(start_value: float, end_value: float, years: float) -> Optional[float]:
     """Calculate CAGR between two values"""
@@ -400,7 +445,38 @@ def main():
             selected_symbol = all_indices[selected_index_name]
         else:
             if "error" in all_indices:
-                st.error(f"Error loading NSE indices: {all_indices['error']}")
+                st.markdown(f"""
+                <div class="error-card">
+                    <h4>❌ Error Loading NSE Indices</h4>
+                    <p><strong>Error:</strong> {all_indices['error']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Display detailed error information if available
+                if "error_details" in all_indices:
+                    with st.expander("🔍 Detailed Error Information"):
+                        error_details = all_indices["error_details"]
+                        
+                        if "status_code" in error_details:
+                            st.write(f"**HTTP Status Code:** {error_details['status_code']}")
+                            st.write(f"**Reason:** {error_details['reason']}")
+                            st.write(f"**URL:** {error_details['url']}")
+                            st.write(f"**Main Page Status:** {error_details['main_page_status']}")
+                            
+                            if "response_text" in error_details:
+                                st.write(f"**Response Text:**")
+                                st.code(error_details['response_text'])
+                            
+                            if "headers" in error_details:
+                                st.write(f"**Response Headers:**")
+                                st.json(error_details['headers'])
+                        
+                        elif "exception_type" in error_details:
+                            st.write(f"**Exception Type:** {error_details['exception_type']}")
+                            st.write(f"**Exception Message:** {error_details['exception_message']}")
+                        
+                        else:
+                            st.json(error_details)
             else:
                 st.error("No NSE indices found. Please try refreshing.")
             return
@@ -465,6 +541,29 @@ def main():
                 <p><strong>Error:</strong> {result['error']}</p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Display detailed error information if available
+            if "error_details" in result:
+                with st.expander("🔍 Detailed Error Information"):
+                    error_details = result["error_details"]
+                    
+                    if "years_attempted" in error_details:
+                        st.write(f"**Years Attempted:** {error_details['years_attempted']}")
+                        st.write(f"**URL:** {error_details['url']}")
+                        st.write(f"**HTTP Status Code:** {error_details['status_code']}")
+                        st.write(f"**Reason:** {error_details['reason']}")
+                        st.write(f"**Main Page Status:** {error_details['main_page_status']}")
+                        
+                        if "response_text" in error_details:
+                            st.write(f"**Response Text:**")
+                            st.code(error_details['response_text'])
+                    
+                    if "exception_type" in error_details:
+                        st.write(f"**Exception Type:** {error_details['exception_type']}")
+                        st.write(f"**Exception Message:** {error_details['exception_message']}")
+                    
+                    st.write(f"**Full Error Details:**")
+                    st.json(error_details)
         
         else:
             # Success - display the data beautifully
