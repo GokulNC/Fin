@@ -65,7 +65,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data()
 def fetch_all_mutual_funds() -> List[Dict]:
     """Fetch all mutual funds from the API and cache the result."""
     try:
@@ -77,7 +77,7 @@ def fetch_all_mutual_funds() -> List[Dict]:
         st.error(f"Error fetching mutual fund list: {str(e)}")
         return []
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=60*60*12)  # Cache for half a day
 def fetch_mutual_fund_data(scheme_code: int) -> Optional[Dict]:
     """Fetch historical data for a specific mutual fund scheme."""
     try:

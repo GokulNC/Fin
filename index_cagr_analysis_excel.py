@@ -17,7 +17,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 import warnings
 warnings.filterwarnings('ignore')
 
-from fetch_nifty_data import get_available_indices
+from yahoo_nifty_data import get_available_indices
 
 def calculate_cagr(start_price, end_price, years):
     """Calculate CAGR given start price, end price, and number of years"""

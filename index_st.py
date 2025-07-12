@@ -10,11 +10,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta, date
 import time
-from fetch_nifty_data import fetch_index_data, get_available_indices, fetch_all_historical_data, calculate_cagr, calculate_rolling_cagr
+from yahoo_nifty_data import fetch_index_data, get_available_indices, fetch_all_historical_data, calculate_cagr, calculate_rolling_cagr
 
 # Page configuration
 st.set_page_config(
-    page_title="📈 NIFTY Index Data Explorer",
+    page_title="📈 Indian Index Data Explorer",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -92,7 +92,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data()  # Cache for 1 hour
+@st.cache_data()
 def check_index_availability():
     """
     Check which indices are currently available via the API
@@ -107,29 +107,6 @@ def check_index_availability():
     
     available_indices = {}
     unavailable_indices = {}
-    
-    # Test a subset of key indices to determine availability
-    # We'll test the most commonly used indices to save time
-    key_indices = {
-        "NIFTY 50": "^NSEI",
-        "NIFTY BANK": "^NSEBANK",
-        "NIFTY IT": "^CNXIT",
-        "NIFTY AUTO": "^CNXAUTO",
-        "NIFTY PHARMA": "^CNXPHARMA",
-        "NIFTY FMCG": "^CNXFMCG",
-        "NIFTY METAL": "^CNXMETAL",
-        "NIFTY ENERGY": "^CNXENERGY",
-        "NIFTY REALTY": "^CNXREALTY",
-        "NIFTY MEDIA": "^CNXMEDIA",
-        "NIFTY PSU BANK": "^CNXPSUBANK",
-        "NIFTY INFRASTRUCTURE": "^CNXINFRA",
-        "NIFTY SERVICES SECTOR": "^CNXSERVICE",
-        "NIFTY NEXT 50": "^NSMIDCP",
-        "NIFTY 100": "^CNX100",
-        "NIFTY 200": "^CNX200",
-        "NIFTY MIDCAP 50": "^NSEMDCP50",
-        "BSE SENSEX": "^BSESN"
-    }
     
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -179,7 +156,7 @@ def main():
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>📈 NIFTY Index Data Explorer</h1>
+        <h1>📈 Indian Index Data Explorer</h1>
         <!-- <p>Real-time Indian Stock Market Index Data</p> -->
     </div>
     """, unsafe_allow_html=True)
@@ -358,7 +335,8 @@ def main():
                         value=default_start,
                         min_value=earliest_available,
                         max_value=latest_available - timedelta(days=365*2),  # At least 2 years before end
-                        help="Start date for rolling analysis"
+                        help="Start date for rolling analysis",
+                        format="DD-MM-YYYY"
                     )
                 
                 # Rolling CAGR compute button
